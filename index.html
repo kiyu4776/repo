@@ -3,89 +3,370 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tetris</title>
+    <title>スマホ対応テトリス（ホールド機能付き）</title>
     <style>
         body {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            height: 100vh;
-            background-color: #222;
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
         }
         canvas {
-            border: 2px solid white;
+            background: #111;
+            display: block;
+            touch-action: none;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            max-width: 300px;
+        }
+        button {
+            font-size: 20px;
+            margin: 5px;
+            padding: 10px 20px;
+            width: 60px;
+            height: 60px;
+            background: #444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        .hold-box, .next-box {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            background: #222;
+            border: 2px solid #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .hold-box {
+            top: 10px;
+            left: 10px;
+        }
+        .next-box {
+            top: 10px;
+            right: 10px;
+        }
+        .score {
+            font-size: 24px;
+            margin-top: 20px;
+        }
+        @media (max-width: 600px) {
+            .hold-box, .next-box {
+                width: 80px;
+                height: 80px;
+            }
         }
     </style>
 </head>
 <body>
     <canvas id="tetris" width="300" height="600"></canvas>
+    <div class="hold-box">
+        <canvas id="holdCanvas" width="80" height="80"></canvas>
+    </div>
+    <div class="next-box">
+        <canvas id="nextCanvas" width="80" height="80"></canvas>
+    </div>
+    <div class="controls">
+        <button onclick="move(-1, 0)">←</button>
+        <button onclick="rotateRight()">↻</button>
+        <button onclick="rotateLeft()">↺</button>
+        <button onclick="move(1, 0)">→</button>
+        <button onclick="softDrop()">↓</button>
+        <button onclick="hardDrop()">↑</button>
+        <button onclick="hold()">H</button>
+    </div>
+    <div class="score">
+        <span id="scoreDisplay">スコア: 0</span>
+    </div>
+
     <script>
         const canvas = document.getElementById("tetris");
         const ctx = canvas.getContext("2d");
-        const ROWS = 20, COLUMNS = 10, SIZE = 30;
-        let board = Array.from({ length: ROWS }, () => Array(COLUMNS).fill(0));
-        let tetromino, posX = 3, posY = 0;
-        const tetrominos = [
-            [[1, 1, 1, 1]],
-            [[1, 1], [1, 1]],
-            [[0, 1, 0], [1, 1, 1]],
-            [[1, 1, 0], [0, 1, 1]],
-            [[0, 1, 1], [1, 1, 0]]
+        const holdCanvas = document.getElementById("holdCanvas");
+        const holdCtx = holdCanvas.getContext("2d");
+        const nextCanvas = document.getElementById("nextCanvas");
+        const nextCtx = nextCanvas.getContext("2d");
+        const scoreDisplay = document.getElementById("scoreDisplay");
+
+        const ROWS = 20, COLS = 10, BLOCK_SIZE = 30;
+        let field = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        let holdPiece = null;
+        let canHold = true;
+        let score = 0;  // スコア
+
+        const TETROMINOES = [
+            { shape: [[1, 1, 1, 1]], color: "cyan", type: "I" }, 
+            { shape: [[1, 1], [1, 1]], color: "yellow", type: "O" }, 
+            { shape: [[0, 1, 1], [1, 1, 0]], color: "green", type: "S" }, 
+            { shape: [[1, 1, 0], [0, 1, 1]], color: "red", type: "Z" }, 
+            { shape: [[1, 0, 0], [1, 1, 1]], color: "orange", type: "L" }, 
+            { shape: [[0, 0, 1], [1, 1, 1]], color: "blue", type: "J" }, 
+            { shape: [[0, 1, 0], [1, 1, 1]], color: "purple", type: "T" }, 
         ];
-        function drawBoard() {
-            ctx.fillStyle = "black";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            board.forEach((row, y) => row.forEach((cell, x) => {
-                if (cell) {
-                    ctx.fillStyle = "cyan";
-                    ctx.fillRect(x * SIZE, y * SIZE, SIZE, SIZE);
-                }
-            }));
+
+        let pieceQueue = [];
+        function generatePieceQueue() {
+            pieceQueue = [...TETROMINOES].sort(() => Math.random() - 0.5);
+            pieceQueue = pieceQueue.concat([...TETROMINOES].sort(() => Math.random() - 0.5));
         }
-        function drawTetromino() {
-            tetromino.forEach((row, y) => row.forEach((cell, x) => {
-                if (cell) {
-                    ctx.fillStyle = "red";
-                    ctx.fillRect((posX + x) * SIZE, (posY + y) * SIZE, SIZE, SIZE);
-                }
-            }));
+
+        generatePieceQueue();
+        let currentPiece = { ...pieceQueue.shift(), x: 3, y: 0 };
+
+        let dropSpeed = 1000;
+        let lastDrop = Date.now();
+
+        function drawBlock(ctx, x, y, size, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * size, y * size, size, size);
+            ctx.strokeStyle = "#000";
+            ctx.strokeRect(x * size, y * size, size, size);
         }
-        function moveDown() {
-            posY++;
-            if (collision()) {
-                posY--;
-                merge();
-                tetromino = tetrominos[Math.floor(Math.random() * tetrominos.length)];
-                posX = 3;
-                posY = 0;
-                if (collision()) {
-                    board = Array.from({ length: ROWS }, () => Array(COLUMNS).fill(0));
+
+        function drawGrid() {
+            ctx.strokeStyle = "#333";
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
                 }
             }
         }
-        function merge() {
-            tetromino.forEach((row, y) => row.forEach((cell, x) => {
-                if (cell) board[posY + y][posX + x] = 1;
-            }));
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (field[y][x]) {
+                        drawBlock(ctx, x, y, BLOCK_SIZE, field[y][x]);
+                    }
+                }
+            }
+            currentPiece.shape.forEach((row, dy) => {
+                row.forEach((value, dx) => {
+                    if (value) {
+                        drawBlock(ctx, currentPiece.x + dx, currentPiece.y + dy, BLOCK_SIZE, currentPiece.color);
+                    }
+                });
+            });
+            drawHoldPiece();
+            drawNextPiece();
+            scoreDisplay.innerText = `スコア: ${score}`;
         }
+
+        function drawHoldPiece() {
+            holdCtx.clearRect(0, 0, holdCanvas.width, holdCanvas.height);
+            if (!holdPiece) return;
+            const size = 15;
+            holdPiece.shape.forEach((row, dy) => {
+                row.forEach((value, dx) => {
+                    if (value) {
+                        drawBlock(holdCtx, dx + 1, dy + 1, size, holdPiece.color);
+                    }
+                });
+            });
+        }
+
+        function drawNextPiece() {
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+            if (pieceQueue.length > 0) {
+                const nextPiece = pieceQueue[0];
+                const size = 15;
+                nextPiece.shape.forEach((row, dy) => {
+                    row.forEach((value, dx) => {
+                        if (value) {
+                            drawBlock(nextCtx, dx + 1, dy + 1, size, nextPiece.color);
+                        }
+                    });
+                });
+            }
+        }
+
+        function move(dx, dy) {
+            currentPiece.x += dx;
+            currentPiece.y += dy;
+            if (collision()) {
+                currentPiece.x -= dx;
+                currentPiece.y -= dy;
+            }
+            draw();
+        }
+
+        function rotateRight() {
+            const rotated = currentPiece.shape[0].map((_, i) =>
+                currentPiece.shape.map(row => row[i]).reverse()
+            );
+            const backupShape = currentPiece.shape;
+            currentPiece.shape = rotated;
+            if (collision()) {
+                currentPiece.shape = backupShape;
+            }
+            draw();
+        }
+
+        function rotateLeft() {
+            const rotated = currentPiece.shape[0].map((_, i) =>
+                currentPiece.shape.map(row => row[i])
+            ).reverse();
+            const backupShape = currentPiece.shape;
+            currentPiece.shape = rotated;
+            if (collision()) {
+                currentPiece.shape = backupShape;
+            }
+            draw();
+        }
+
+        function mergePiece() {
+            currentPiece.shape.forEach((row, dy) => {
+                row.forEach((value, dx) => {
+                    if (value) {
+                        field[currentPiece.y + dy][currentPiece.x + dx] = currentPiece.color;
+                    }
+                });
+            });
+        }
+
+        function clearLines() {
+            let linesCleared = 0;
+            field = field.filter(row => row.some(cell => cell === 0));
+            while (field.length < ROWS) {
+                field.unshift(Array(COLS).fill(0));
+            }
+
+            // ラインが埋まっている行を削除し、スコアを更新
+            for (let y = 0; y < ROWS; y++) {
+                if (field[y].every(cell => cell !== 0)) {
+                    linesCleared++;
+                    field.splice(y, 1);
+                    field.unshift(Array(COLS).fill(0));
+                }
+            }
+
+            if (linesCleared > 0) {
+                score += linesCleared * 100;  // ラインを消した数に応じてスコアを加算
+            }
+        }
+
+        function drop() {
+            currentPiece.y++;
+            if (collision()) {
+                currentPiece.y--;
+                mergePiece();
+                clearLines();
+                canHold = true;
+                if (pieceQueue.length === 0) generatePieceQueue();
+                currentPiece = { ...pieceQueue.shift(), x: 3, y: 0 };
+                if (collision()) {
+                    alert("ゲームオーバー");
+                    field = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+                    generatePieceQueue();
+                }
+            }
+            draw();
+        }
+
+        function softDrop() {
+            currentPiece.y++;
+            if (collision()) {
+                currentPiece.y--;
+                mergePiece();
+                clearLines();
+                canHold = true;
+                if (pieceQueue.length === 0) generatePieceQueue();
+                currentPiece = { ...pieceQueue.shift(), x: 3, y: 0 };
+                if (collision()) {
+                    alert("ゲームオーバー");
+                    field = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+                    generatePieceQueue();
+                }
+            }
+            draw();
+        }
+
+        function hardDrop() {
+            while (!collision()) {
+                currentPiece.y++;
+            }
+            currentPiece.y--;
+            mergePiece();
+            clearLines();
+            canHold = true;
+            if (pieceQueue.length === 0) generatePieceQueue();
+            currentPiece = { ...pieceQueue.shift(), x: 3, y: 0 };
+            if (collision()) {
+                alert("ゲームオーバー");
+                field = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+                generatePieceQueue();
+            }
+            draw();
+        }
+
+        function hold() {
+            if (canHold) {
+                if (holdPiece === null) {
+                    holdPiece = { ...currentPiece };
+                    currentPiece = { ...pieceQueue.shift(), x: 3, y: 0 };
+                } else {
+                    const temp = holdPiece;
+                    holdPiece = { ...currentPiece };
+                    currentPiece = { ...temp, x: 3, y: 0 };
+                }
+                canHold = false;
+                draw();
+            }
+        }
+
         function collision() {
-            return tetromino.some((row, y) => row.some((cell, x) => {
-                return cell && (board[posY + y]?.[posX + x] || posY + y >= ROWS);
-            }));
+            return currentPiece.shape.some((row, dy) => {
+                return row.some((value, dx) => {
+                    if (value) {
+                        const x = currentPiece.x + dx;
+                        const y = currentPiece.y + dy;
+                        return x < 0 || x >= COLS || y >= ROWS || field[y][x];
+                    }
+                    return false;
+                });
+            });
         }
-        function update() {
-            moveDown();
-            drawBoard();
-            drawTetromino();
-            setTimeout(update, 500);
+
+        function gameLoop() {
+            const now = Date.now();
+            if (now - lastDrop > dropSpeed) {
+                drop();
+                lastDrop = now;
+            }
+            requestAnimationFrame(gameLoop);
         }
-        document.addEventListener("keydown", (e) => {
-            if (e.key === "ArrowLeft") posX--;
-            if (e.key === "ArrowRight") posX++;
-            if (e.key === "ArrowDown") moveDown();
+
+        window.addEventListener("keydown", e => {
+            switch (e.key) {
+                case "ArrowLeft":
+                    move(-1, 0);
+                    break;
+                case "ArrowRight":
+                    move(1, 0);
+                    break;
+                case "ArrowDown":
+                    softDrop();
+                    break;
+                case "ArrowUp":
+                    rotateRight();
+                    break;
+                case " ":
+                    hardDrop();
+                    break;
+            }
         });
-        tetromino = tetrominos[Math.floor(Math.random() * tetrominos.length)];
-        update();
+
+        gameLoop();
     </script>
 </body>
 </html>
