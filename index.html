@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+        }
+        canvas {
+            border: 2px solid white;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="tetris" width="300" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById("tetris");
+        const ctx = canvas.getContext("2d");
+        const ROWS = 20, COLUMNS = 10, SIZE = 30;
+        let board = Array.from({ length: ROWS }, () => Array(COLUMNS).fill(0));
+        let tetromino, posX = 3, posY = 0;
+        const tetrominos = [
+            [[1, 1, 1, 1]],
+            [[1, 1], [1, 1]],
+            [[0, 1, 0], [1, 1, 1]],
+            [[1, 1, 0], [0, 1, 1]],
+            [[0, 1, 1], [1, 1, 0]]
+        ];
+        function drawBoard() {
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            board.forEach((row, y) => row.forEach((cell, x) => {
+                if (cell) {
+                    ctx.fillStyle = "cyan";
+                    ctx.fillRect(x * SIZE, y * SIZE, SIZE, SIZE);
+                }
+            }));
+        }
+        function drawTetromino() {
+            tetromino.forEach((row, y) => row.forEach((cell, x) => {
+                if (cell) {
+                    ctx.fillStyle = "red";
+                    ctx.fillRect((posX + x) * SIZE, (posY + y) * SIZE, SIZE, SIZE);
+                }
+            }));
+        }
+        function moveDown() {
+            posY++;
+            if (collision()) {
+                posY--;
+                merge();
+                tetromino = tetrominos[Math.floor(Math.random() * tetrominos.length)];
+                posX = 3;
+                posY = 0;
+                if (collision()) {
+                    board = Array.from({ length: ROWS }, () => Array(COLUMNS).fill(0));
+                }
+            }
+        }
+        function merge() {
+            tetromino.forEach((row, y) => row.forEach((cell, x) => {
+                if (cell) board[posY + y][posX + x] = 1;
+            }));
+        }
+        function collision() {
+            return tetromino.some((row, y) => row.some((cell, x) => {
+                return cell && (board[posY + y]?.[posX + x] || posY + y >= ROWS);
+            }));
+        }
+        function update() {
+            moveDown();
+            drawBoard();
+            drawTetromino();
+            setTimeout(update, 500);
+        }
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowLeft") posX--;
+            if (e.key === "ArrowRight") posX++;
+            if (e.key === "ArrowDown") moveDown();
+        });
+        tetromino = tetrominos[Math.floor(Math.random() * tetrominos.length)];
+        update();
+    </script>
+</body>
+</html>
